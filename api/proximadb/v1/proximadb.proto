@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package proximadb.v1;
+
+option go_package = "github.com/cotishq/proximadb/gen/proximadbv1;proximadbv1";
+
+// Proxima is the network API over one collection store.
+service Proxima {
+  rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse);
+  rpc Insert(InsertRequest) returns (InsertResponse);
+  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+}
+
+enum Metric {
+  METRIC_UNSPECIFIED = 0;
+  METRIC_COSINE = 1;
+  METRIC_L2 = 2;
+  METRIC_DOT = 3;
+}
+
+message CreateCollectionRequest {
+  string name = 1;
+  Metric metric = 2;
+  uint32 dimension = 3;
+}
+
+message CreateCollectionResponse {}
+
+message InsertRequest {
+  string collection = 1;
+  uint64 id = 2;
+  repeated float vector = 3;
+  map<string, string> tags = 4;
+}
+
+message InsertResponse {}
+
+message SearchRequest {
+  string collection = 1;
+  repeated float vector = 2;
+  uint32 k = 3;
+  map<string, string> filter = 4;
+}
+
+message Hit {
+  uint64 id = 1;
+  float distance = 2;
+}
+
+message SearchResponse {
+  repeated Hit hits = 1;
+}
+
+message DeleteRequest {
+  string collection = 1;
+  uint64 id = 2;
+}
+
+message DeleteResponse {}
