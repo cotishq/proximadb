@@ -2,14 +2,35 @@ syntax = "proto3";
 
 package proximadb.v1;
 
+import "google/api/annotations.proto";
+
 option go_package = "github.com/cotishq/proximadb/gen/proximadbv1;proximadbv1";
 
 // Proxima is the network API over one collection store.
 service Proxima {
-  rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse);
-  rpc Insert(InsertRequest) returns (InsertResponse);
-  rpc Search(SearchRequest) returns (SearchResponse);
-  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {
+    option (google.api.http) = {
+      post: "/v1/collections"
+      body: "*"
+    };
+  }
+  rpc Insert(InsertRequest) returns (InsertResponse) {
+    option (google.api.http) = {
+      post: "/v1/collections/{collection}/vectors"
+      body: "*"
+    };
+  }
+  rpc Search(SearchRequest) returns (SearchResponse) {
+    option (google.api.http) = {
+      post: "/v1/collections/{collection}/search"
+      body: "*"
+    };
+  }
+  rpc Delete(DeleteRequest) returns (DeleteResponse) {
+    option (google.api.http) = {
+      delete: "/v1/collections/{collection}/vectors/{id}"
+    };
+  }
 }
 
 enum Metric {

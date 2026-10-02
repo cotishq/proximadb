@@ -7,6 +7,7 @@
 package proximadbv1
 
 import (
+	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -529,7 +530,7 @@ var File_api_proximadb_v1_proximadb_proto protoreflect.FileDescriptor
 
 const file_api_proximadb_v1_proximadb_proto_rawDesc = "" +
 	"\n" +
-	" api/proximadb/v1/proximadb.proto\x12\fproximadb.v1\"y\n" +
+	" api/proximadb/v1/proximadb.proto\x12\fproximadb.v1\x1a\x1cgoogle/api/annotations.proto\"y\n" +
 	"\x17CreateCollectionRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12,\n" +
 	"\x06metric\x18\x02 \x01(\x0e2\x14.proximadb.v1.MetricR\x06metric\x12\x1c\n" +
@@ -572,12 +573,12 @@ const file_api_proximadb_v1_proximadb_proto_rawDesc = "" +
 	"\rMETRIC_COSINE\x10\x01\x12\r\n" +
 	"\tMETRIC_L2\x10\x02\x12\x0e\n" +
 	"\n" +
-	"METRIC_DOT\x10\x032\xbb\x02\n" +
-	"\aProxima\x12a\n" +
-	"\x10CreateCollection\x12%.proximadb.v1.CreateCollectionRequest\x1a&.proximadb.v1.CreateCollectionResponse\x12C\n" +
-	"\x06Insert\x12\x1b.proximadb.v1.InsertRequest\x1a\x1c.proximadb.v1.InsertResponse\x12C\n" +
-	"\x06Search\x12\x1b.proximadb.v1.SearchRequest\x1a\x1c.proximadb.v1.SearchResponse\x12C\n" +
-	"\x06Delete\x12\x1b.proximadb.v1.DeleteRequest\x1a\x1c.proximadb.v1.DeleteResponseB:Z8github.com/cotishq/proximadb/gen/proximadbv1;proximadbv1b\x06proto3"
+	"METRIC_DOT\x10\x032\xeb\x03\n" +
+	"\aProxima\x12}\n" +
+	"\x10CreateCollection\x12%.proximadb.v1.CreateCollectionRequest\x1a&.proximadb.v1.CreateCollectionResponse\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\"\x0f/v1/collections\x12t\n" +
+	"\x06Insert\x12\x1b.proximadb.v1.InsertRequest\x1a\x1c.proximadb.v1.InsertResponse\"/\x82\xd3\xe4\x93\x02):\x01*\"$/v1/collections/{collection}/vectors\x12s\n" +
+	"\x06Search\x12\x1b.proximadb.v1.SearchRequest\x1a\x1c.proximadb.v1.SearchResponse\".\x82\xd3\xe4\x93\x02(:\x01*\"#/v1/collections/{collection}/search\x12v\n" +
+	"\x06Delete\x12\x1b.proximadb.v1.DeleteRequest\x1a\x1c.proximadb.v1.DeleteResponse\"1\x82\xd3\xe4\x93\x02+*)/v1/collections/{collection}/vectors/{id}B:Z8github.com/cotishq/proximadb/gen/proximadbv1;proximadbv1b\x06proto3"
 
 var (
 	file_api_proximadb_v1_proximadb_proto_rawDescOnce sync.Once
