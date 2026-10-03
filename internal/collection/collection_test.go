@@ -133,3 +133,22 @@ func TestTagFilter(t *testing.T) {
 		t.Fatalf("unfiltered = %+v, want ids 1 then 2", open)
 	}
 }
+
+func TestLiveCountIgnoresDeleted(t *testing.T) {
+	s := New()
+	if err := s.Create("images", metric.L2, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Insert("images", 1, []float32{1, 0}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Insert("images", 2, []float32{0, 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete("images", 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.LiveCount(); got != 1 {
+		t.Fatalf("LiveCount = %d, want 1", got)
+	}
+}

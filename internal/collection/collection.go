@@ -301,3 +301,14 @@ func validMetric(m metric.Metric) bool {
 		return false
 	}
 }
+
+// LiveCount returns how many vectors are still searchable.
+func (s *Store) LiveCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	n := 0
+	for _, col := range s.cols {
+		n += len(col.live)
+	}
+	return n
+}

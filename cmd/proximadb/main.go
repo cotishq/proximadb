@@ -14,6 +14,8 @@ import (
 	"github.com/cotishq/proximadb/gen/proximadbv1"
 	"github.com/cotishq/proximadb/internal/collection"
 	"github.com/cotishq/proximadb/internal/server"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -24,6 +26,12 @@ func main() {
 	if *data == "" {
 		log.Fatal("proximadb: -data directory is required")
 	}
+
+	shutdown, err := setupOTelSDK(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer shutdown(context.Background())
 
 	store, err := collection.Open(*data)
 	if err != nil {
@@ -39,6 +47,9 @@ func main() {
 	if err := proximadbv1.RegisterProximaHandlerServer(context.Background(), mux, srv); err != nil {
 		log.Fatal(err)
 	}
+	root := http.NewServeMux()
+	root.Handle("/metrics", promhttp.Handler())
+	root.Handle("/", mux)
 
 	grpcLis, err := net.Listen("tcp", *listen)
 	if err != nil {
@@ -50,7 +61,7 @@ func main() {
 	}
 	go func() {
 		log.Printf("proximadb REST listening on %s", httpLis.Addr())
-		if err := http.Serve(httpLis, mux); err != nil {
+		if err := http.Serve(httpLis, root); err != nil {
 			log.Println(err)
 			os.Exit(1)
 		}
