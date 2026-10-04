@@ -23,3 +23,9 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
+
+  jaeger:
+   image: jaegertracing/jaeger:2.21.0
+   ports:
+    - "16686:16686"
+    - "4317:4317"

@@ -8,7 +8,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
-	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -24,7 +24,10 @@ func setupOTelSDK(ctx context.Context) (func(context.Context) error, error) {
 		return nil, err
 	}
 
-	traceExp, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+	traceExp, err := otlptracegrpc.New(ctx, 
+		otlptracegrpc.WithEndpoint("127.0.0.1:4317"),
+		otlptracegrpc.WithInsecure(),
+	)
 	if err != nil {
 		return nil, err
 	}
