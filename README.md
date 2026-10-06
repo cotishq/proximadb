@@ -90,6 +90,29 @@ go run ./cmd/proximadb -listen 127.0.0.1:7878 -http 0.0.0.0:7879 -data ./data
 
 Grafana shows request count, request rate, latency, and how many vectors are still searchable. Jaeger shows one span per call. Ports `9091` and `3001` are the host mappings in this Compose file, because `9090` and `3000` are often already taken.
 
+## Benchmark
+
+In-process search on synthetic vectors. Each coordinate is drawn uniformly from `[-1, 1]`. The same vectors go into HNSW and the exact flat index. Recall@10 is the fraction of the flat top 10 that HNSW also returned. p50 and p99 time only the HNSW search.
+
+| | |
+| --- | --- |
+| Vectors | 1,000,000 |
+| Dimension | 16 |
+| Distance | L2 |
+| M | 16 |
+| efConstruction | 200 |
+| efSearch | 64 |
+| Queries | 100, seed 42 |
+| Machine | Intel Core i5-12450H, 12 threads, 15 GB RAM |
+| Recall@10 | 0.997 |
+| Search p50 | 1.07 ms |
+| Search p99 | 1.91 ms |
+| Insert | 50 min 40 s |
+
+```bash
+go run ./cmd/bench -n 1000000 -dim 16 -queries 100
+```
+
 ## Tests
 
 ```bash
