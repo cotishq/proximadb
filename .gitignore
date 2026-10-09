@@ -1,0 +1,17 @@
+# Local WAL and runtime data (see -data flag)
+/data/
+
+# Go build and test artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/proximadb
+/bench
+
+# Optional local Go workspace
+go.work
+go.work.sum
