@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cotishq/proximadb/internal/index"
 	"github.com/cotishq/proximadb/internal/metric"
@@ -16,6 +17,9 @@ const (
 	defaultEfConstruction = 200
 	defaultEfSearch       = 64
 	maxLevelCap           = 16
+	// maxVisitedIDs is the largest id that uses the reused stamp slice.
+	// Bigger ids fall back to a small map for that one walk.
+	maxVisitedIDs = 32_000_000
 )
 
 // candidate is a node the walk is considering.
@@ -55,6 +59,10 @@ type Index struct {
 	entry          uint64
 	hasEntry       bool
 	maxLevel       int
+	// visited[id] == visitGen means this walk already saw id.
+	// The slice is reused. Each searchLayer bumps visitGen.
+	visited  []uint32
+	visitGen uint32
 }
 
 // New builds an empty graph for one metric and one dimension.
@@ -87,6 +95,7 @@ func (idx *Index) Insert(id uint64, vec []float32) error {
 	if _, exists := idx.nodes[id]; exists {
 		return fmt.Errorf("hnsw: id %d already exists", id)
 	}
+	idx.growVisited(id)
 
 	copied := make([]float32, len(vec))
 	copy(copied, vec)
@@ -232,6 +241,60 @@ func (idx *Index) maxLinks(layer int) int {
 	return idx.M
 }
 
+// growVisited makes room for id in the reused stamp slice.
+// Capacity doubles so sequential inserts do not reallocate every time.
+func (idx *Index) growVisited(id uint64) {
+	if id >= maxVisitedIDs || id < uint64(len(idx.visited)) {
+		return
+	}
+	need := int(id) + 1
+	size := 64
+	if n := len(idx.visited); n > 0 {
+		size = n * 2
+	}
+	if size < need {
+		size = need
+	}
+	if size > maxVisitedIDs {
+		size = maxVisitedIDs
+	}
+	next := make([]uint32, size)
+	copy(next, idx.visited)
+	idx.visited = next
+}
+
+// nextVisit starts a new walk. Zero means the counter wrapped, so the slice is cleared.
+func (idx *Index) nextVisit() uint32 {
+	g := atomic.AddUint32(&idx.visitGen, 1)
+	if g != 0 {
+		return g
+	}
+	for i := range idx.visited {
+		atomic.StoreUint32(&idx.visited[i], 0)
+	}
+	return atomic.AddUint32(&idx.visitGen, 1)
+}
+
+// seen reports whether id was already marked on this walk, and marks it if not.
+// extra holds ids that do not fit in the stamp slice.
+func (idx *Index) seen(id uint64, gen uint32, extra map[uint64]struct{}) (bool, map[uint64]struct{}) {
+	if id < uint64(len(idx.visited)) {
+		if atomic.LoadUint32(&idx.visited[id]) == gen {
+			return true, extra
+		}
+		atomic.StoreUint32(&idx.visited[id], gen)
+		return false, extra
+	}
+	if extra == nil {
+		extra = make(map[uint64]struct{})
+	}
+	if _, ok := extra[id]; ok {
+		return true, extra
+	}
+	extra[id] = struct{}{}
+	return false, extra
+}
+
 // searchLayer explores layer starting from ep and keeps the ef closest nodes.
 func (idx *Index) searchLayer(q []float32, ep uint64, ef int, layer int) ([]candidate, error) {
 	epDist, err := idx.distance(q, idx.nodes[ep].vec)
@@ -239,8 +302,10 @@ func (idx *Index) searchLayer(q []float32, ep uint64, ef int, layer int) ([]cand
 		return nil, err
 	}
 	start := candidate{id: ep, dist: epDist}
+	gen := idx.nextVisit()
+	var extra map[uint64]struct{}
+	_, extra = idx.seen(ep, gen, extra)
 
-	visited := map[uint64]struct{}{ep: {}}
 	// candidates is the frontier, closest first. w is the best list, also closest first.
 	candidates := []candidate{start}
 	w := []candidate{start}
@@ -255,10 +320,11 @@ func (idx *Index) searchLayer(q []float32, ep uint64, ef int, layer int) ([]cand
 		}
 
 		for _, nb := range idx.nodes[current.id].links[layer] {
-			if _, seen := visited[nb]; seen {
+			var already bool
+			already, extra = idx.seen(nb, gen, extra)
+			if already {
 				continue
 			}
-			visited[nb] = struct{}{}
 
 			d, err := idx.distance(q, idx.nodes[nb].vec)
 			if err != nil {
