@@ -36,6 +36,77 @@ func closer(a, b candidate) bool {
 	return a.dist < b.dist
 }
 
+func pushMin(h *[]candidate, c candidate) {
+	*h = append(*h, c)
+	siftUp(*h, len(*h)-1, true)
+}
+
+func popMin(h *[]candidate) candidate {
+	old := *h
+	c := old[0]
+	n := len(old) - 1
+	old[0] = old[n]
+	*h = old[:n]
+	if n > 0 {
+		siftDown(*h, 0, true)
+	}
+	return c
+}
+
+func pushMax(h *[]candidate, c candidate) {
+	*h = append(*h, c)
+	siftUp(*h, len(*h)-1, false)
+}
+
+func popMax(h *[]candidate) candidate {
+	old := *h
+	c := old[0]
+	n := len(old) - 1
+	old[0] = old[n]
+	*h = old[:n]
+	if n > 0 {
+		siftDown(*h, 0, false)
+	}
+	return c
+}
+
+func siftUp(h []candidate, i int, min bool) {
+	for i > 0 {
+		p := (i - 1) / 2
+		if !heapLess(h[i], h[p], min) {
+			break
+		}
+		h[i], h[p] = h[p], h[i]
+		i = p
+	}
+}
+
+func siftDown(h []candidate, i int, min bool) {
+	n := len(h)
+	for {
+		l := 2*i + 1
+		if l >= n {
+			return
+		}
+		best := l
+		if r := l + 1; r < n && heapLess(h[r], h[l], min) {
+			best = r
+		}
+		if !heapLess(h[best], h[i], min) {
+			return
+		}
+		h[i], h[best] = h[best], h[i]
+		i = best
+	}
+}
+
+func heapLess(a, b candidate, min bool) bool {
+	if min {
+		return closer(a, b)
+	}
+	return closer(b, a)
+}
+
 type node struct {
 	vec   []float32
 	level int
@@ -306,15 +377,13 @@ func (idx *Index) searchLayer(q []float32, ep uint64, ef int, layer int) ([]cand
 	var extra map[uint64]struct{}
 	_, extra = idx.seen(ep, gen, extra)
 
-	// candidates is the frontier, closest first. w is the best list, also closest first.
+	// candidates is the closest-first frontier. w keeps the ef closest, furthest on top.
 	candidates := []candidate{start}
 	w := []candidate{start}
 
 	for len(candidates) > 0 {
-		current := candidates[0]
-		candidates = candidates[1:]
-
-		furthest := w[len(w)-1]
+		current := popMin(&candidates)
+		furthest := w[0]
 		if current.dist > furthest.dist {
 			break
 		}
@@ -331,17 +400,21 @@ func (idx *Index) searchLayer(q []float32, ep uint64, ef int, layer int) ([]cand
 				return nil, err
 			}
 			next := candidate{id: nb, dist: d}
-			furthest = w[len(w)-1]
+			furthest = w[0]
 			if next.dist < furthest.dist || len(w) < ef {
-				candidates = insertClosest(candidates, next)
-				w = insertClosest(w, next)
+				pushMin(&candidates, next)
+				pushMax(&w, next)
 				if len(w) > ef {
-					w = w[:ef]
+					popMax(&w)
 				}
 			}
 		}
 	}
-	return w, nil
+
+	// Insert uses nearest[0] as the closest hop. Search takes ids in that order.
+	out := []candidate(w)
+	sort.Slice(out, func(i, j int) bool { return closer(out[i], out[j]) })
+	return out, nil
 }
 
 // selectNeighbors keeps at most limit neighbors, preferring ones that sit in different directions.
@@ -423,18 +496,6 @@ func (idx *Index) prune(id uint64, layer int) error {
 
 func (idx *Index) distance(a, b []float32) (float32, error) {
 	return metric.Distance(idx.m, a, b)
-}
-
-// insertClosest inserts c so the slice stays ordered closest-first.
-func insertClosest(list []candidate, c candidate) []candidate {
-	i := 0
-	for i < len(list) && !closer(c, list[i]) {
-		i++
-	}
-	list = append(list, candidate{})
-	copy(list[i+1:], list[i:])
-	list[i] = c
-	return list
 }
 
 // Compile-time check that *Index implements index.Index.
