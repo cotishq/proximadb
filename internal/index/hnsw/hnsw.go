@@ -125,11 +125,14 @@ type Index struct {
 	efSearch       int
 	ml             float64
 	rng            *rand.Rand
-	nodes          map[uint64]*node
-	deleted        map[uint64]struct{}
-	entry          uint64
-	hasEntry       bool
-	maxLevel       int
+	// nodes[id] is the graph node when id fits in the slice.
+	// overflow holds the rare ids at or above maxVisitedIDs.
+	nodes    []*node
+	overflow map[uint64]*node
+	deleted  map[uint64]struct{}
+	entry    uint64
+	hasEntry bool
+	maxLevel int
 	// visited[id] == visitGen means this walk already saw id.
 	// The slice is reused. Each searchLayer bumps visitGen.
 	visited  []uint32
@@ -151,9 +154,26 @@ func New(m metric.Metric, dim int) (*Index, error) {
 		efSearch:       defaultEfSearch,
 		ml:             1 / math.Log(float64(defaultM)),
 		rng:            rand.New(rand.NewSource(1)),
-		nodes:          make(map[uint64]*node),
 		deleted:        make(map[uint64]struct{}),
 	}, nil
+}
+
+func (idx *Index) node(id uint64) *node {
+	if id < uint64(len(idx.nodes)) {
+		return idx.nodes[id]
+	}
+	return idx.overflow[id]
+}
+
+func (idx *Index) setNode(id uint64, n *node) {
+	if id < uint64(len(idx.nodes)) {
+		idx.nodes[id] = n
+		return
+	}
+	if idx.overflow == nil {
+		idx.overflow = make(map[uint64]*node)
+	}
+	idx.overflow[id] = n
 }
 
 func (idx *Index) Insert(id uint64, vec []float32) error {
@@ -163,10 +183,10 @@ func (idx *Index) Insert(id uint64, vec []float32) error {
 	if len(vec) != idx.dim {
 		return fmt.Errorf("hnsw: dimension %d, want %d", len(vec), idx.dim)
 	}
-	if _, exists := idx.nodes[id]; exists {
+	if idx.node(id) != nil {
 		return fmt.Errorf("hnsw: id %d already exists", id)
 	}
-	idx.growVisited(id)
+	idx.grow(id)
 
 	copied := make([]float32, len(vec))
 	copy(copied, vec)
@@ -177,7 +197,7 @@ func (idx *Index) Insert(id uint64, vec []float32) error {
 		level: level,
 		links: make([][]uint64, level+1),
 	}
-	idx.nodes[id] = n
+	idx.setNode(id, n)
 
 	if !idx.hasEntry {
 		idx.entry = id
@@ -214,7 +234,7 @@ func (idx *Index) Insert(id uint64, vec []float32) error {
 		n.links[lc] = make([]uint64, len(selected))
 		for i, s := range selected {
 			n.links[lc][i] = s.id
-			neighbor := idx.nodes[s.id]
+			neighbor := idx.node(s.id)
 			neighbor.links[lc] = append(neighbor.links[lc], id)
 			if err := idx.prune(s.id, lc); err != nil {
 				return err
@@ -281,7 +301,7 @@ func (idx *Index) Delete(id uint64) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	if _, ok := idx.nodes[id]; !ok {
+	if idx.node(id) == nil {
 		return fmt.Errorf("hnsw: id %d not found", id)
 	}
 	if _, ok := idx.deleted[id]; ok {
@@ -312,15 +332,15 @@ func (idx *Index) maxLinks(layer int) int {
 	return idx.M
 }
 
-// growVisited makes room for id in the reused stamp slice.
+// grow makes room for id in the node slice and the stamp slice.
 // Capacity doubles so sequential inserts do not reallocate every time.
-func (idx *Index) growVisited(id uint64) {
-	if id >= maxVisitedIDs || id < uint64(len(idx.visited)) {
+func (idx *Index) grow(id uint64) {
+	if id >= maxVisitedIDs || id < uint64(len(idx.nodes)) {
 		return
 	}
 	need := int(id) + 1
 	size := 64
-	if n := len(idx.visited); n > 0 {
+	if n := len(idx.nodes); n > 0 {
 		size = n * 2
 	}
 	if size < need {
@@ -329,9 +349,12 @@ func (idx *Index) growVisited(id uint64) {
 	if size > maxVisitedIDs {
 		size = maxVisitedIDs
 	}
-	next := make([]uint32, size)
-	copy(next, idx.visited)
-	idx.visited = next
+	nodes := make([]*node, size)
+	copy(nodes, idx.nodes)
+	idx.nodes = nodes
+	visited := make([]uint32, size)
+	copy(visited, idx.visited)
+	idx.visited = visited
 }
 
 // nextVisit starts a new walk. Zero means the counter wrapped, so the slice is cleared.
@@ -368,7 +391,7 @@ func (idx *Index) seen(id uint64, gen uint32, extra map[uint64]struct{}) (bool, 
 
 // searchLayer explores layer starting from ep and keeps the ef closest nodes.
 func (idx *Index) searchLayer(q []float32, ep uint64, ef int, layer int) ([]candidate, error) {
-	epDist, err := idx.distance(q, idx.nodes[ep].vec)
+	epDist, err := idx.distance(q, idx.node(ep).vec)
 	if err != nil {
 		return nil, err
 	}
@@ -388,14 +411,14 @@ func (idx *Index) searchLayer(q []float32, ep uint64, ef int, layer int) ([]cand
 			break
 		}
 
-		for _, nb := range idx.nodes[current.id].links[layer] {
+		for _, nb := range idx.node(current.id).links[layer] {
 			var already bool
 			already, extra = idx.seen(nb, gen, extra)
 			if already {
 				continue
 			}
 
-			d, err := idx.distance(q, idx.nodes[nb].vec)
+			d, err := idx.distance(q, idx.node(nb).vec)
 			if err != nil {
 				return nil, err
 			}
@@ -435,10 +458,10 @@ func (idx *Index) selectNeighbors(cands []candidate, limit int) ([]candidate, er
 		if len(selected) == limit {
 			break
 		}
-		ev := idx.nodes[e.id].vec
+		ev := idx.node(e.id).vec
 		diverse := true
 		for _, s := range selected {
-			between, err := idx.distance(ev, idx.nodes[s.id].vec)
+			between, err := idx.distance(ev, idx.node(s.id).vec)
 			if err != nil {
 				return nil, err
 			}
@@ -465,7 +488,7 @@ func (idx *Index) selectNeighbors(cands []candidate, limit int) ([]candidate, er
 
 // prune drops the worst links once a node has more than the layer allows.
 func (idx *Index) prune(id uint64, layer int) error {
-	n := idx.nodes[id]
+	n := idx.node(id)
 	limit := idx.maxLinks(layer)
 	if len(n.links[layer]) <= limit {
 		return nil
@@ -476,7 +499,7 @@ func (idx *Index) prune(id uint64, layer int) error {
 		if nb == id {
 			continue
 		}
-		d, err := idx.distance(n.vec, idx.nodes[nb].vec)
+		d, err := idx.distance(n.vec, idx.node(nb).vec)
 		if err != nil {
 			return err
 		}
