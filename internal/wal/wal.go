@@ -123,6 +123,55 @@ func (l *Log) Records() [][]byte {
 	return out
 }
 
+// Replace writes records as a new log at path, fsyncs, and opens it.
+// path.tmp is used so a crash leaves the previous file in place.
+func Replace(path string, records [][]byte) (*Log, error) {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	fail := func(err error) (*Log, error) {
+		f.Close()
+		os.Remove(tmp)
+		return nil, err
+	}
+	if _, err := f.Write([]byte(magic)); err != nil {
+		return fail(err)
+	}
+	for _, payload := range records {
+		if len(payload) == 0 || len(payload) > maxPayload {
+			return fail(fmt.Errorf("wal: bad payload length %d", len(payload)))
+		}
+		frame := make([]byte, 8+len(payload))
+		binary.LittleEndian.PutUint32(frame[0:4], uint32(len(payload)))
+		binary.LittleEndian.PutUint32(frame[4:8], crc32.ChecksumIEEE(payload))
+		copy(frame[8:], payload)
+		if _, err := f.Write(frame); err != nil {
+			return fail(err)
+		}
+	}
+	if err := f.Sync(); err != nil {
+		return fail(err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return nil, err
+	}
+	if err := syncDir(tmp); err != nil {
+		os.Remove(tmp)
+		return nil, err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return nil, err
+	}
+	if err := syncDir(path); err != nil {
+		return nil, err
+	}
+	return Open(path)
+}
+
 // Close closes the file.
 func (l *Log) Close() error {
 	l.mu.Lock()

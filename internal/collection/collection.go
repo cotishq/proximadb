@@ -17,6 +17,7 @@ import (
 type collection struct {
 	mu   sync.Mutex
 	dim  int
+	m    metric.Metric
 	idx  *hnsw.Index
 	tags map[uint64]map[string]string
 	seen map[uint64]struct{}
@@ -29,6 +30,7 @@ type Store struct {
 	mu   sync.RWMutex
 	cols map[string]*collection
 	log  *wal.Log
+	dir  string
 }
 
 // New returns an empty in-memory store. Data disappears when the process exits.
@@ -52,6 +54,7 @@ func Open(dir string) (*Store, error) {
 	s := &Store{
 		cols: make(map[string]*collection),
 		log:  lg,
+		dir:  dir,
 	}
 	for _, payload := range lg.Records() {
 		if err := s.apply(payload); err != nil {
@@ -228,12 +231,53 @@ func (s *Store) addCollection(name string, m metric.Metric, dim int) error {
 	}
 	s.cols[name] = &collection{
 		dim:  dim,
+		m:    m,
 		idx:  idx,
 		tags: make(map[uint64]map[string]string),
 		seen: make(map[uint64]struct{}),
 		live: make(map[uint64]struct{}),
 	}
 	return nil
+}
+
+// Checkpoint rewrites the log as the live store: one create per collection
+// and one insert per remaining id. Deletes disappear. Open still replays wal.log.
+func (s *Store) Checkpoint() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.log == nil {
+		return fmt.Errorf("collection: memory-only store has no log")
+	}
+	recs, err := s.snapshotRecords()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(s.dir, "wal.log")
+	if err := s.log.Close(); err != nil {
+		return err
+	}
+	s.log = nil
+	lg, err := wal.Replace(path, recs)
+	if err != nil {
+		return err
+	}
+	s.log = lg
+	return nil
+}
+
+func (s *Store) snapshotRecords() ([][]byte, error) {
+	recs := make([][]byte, 0)
+	for name, col := range s.cols {
+		recs = append(recs, encodeCreate(name, col.m, col.dim))
+		for id := range col.live {
+			vec, err := col.idx.Vector(id)
+			if err != nil {
+				return nil, err
+			}
+			recs = append(recs, encodeInsert(name, id, vec, col.tags[id]))
+		}
+	}
+	return recs, nil
 }
 
 func (s *Store) insertInto(col *collection, id uint64, vec []float32, tags map[string]string) error {

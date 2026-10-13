@@ -311,6 +311,22 @@ func (idx *Index) Delete(id uint64) error {
 	return nil
 }
 
+// Vector returns a copy of the vector stored under id.
+func (idx *Index) Vector(id uint64) ([]float32, error) {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	n := idx.node(id)
+	if n == nil {
+		return nil, fmt.Errorf("hnsw: id %d not found", id)
+	}
+	if _, dead := idx.deleted[id]; dead {
+		return nil, fmt.Errorf("hnsw: id %d not found", id)
+	}
+	out := make([]float32, len(n.vec))
+	copy(out, n.vec)
+	return out, nil
+}
+
 // randomLevel picks how high this node reaches.
 // P(level >= 1) is about 1/M, then thins by that factor each layer above.
 func (idx *Index) randomLevel() int {

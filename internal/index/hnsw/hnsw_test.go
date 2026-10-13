@@ -25,6 +25,21 @@ func TestSearchFindsInsertedVector(t *testing.T) {
 	if len(hits) != 1 || hits[0].ID != 7 || hits[0].Distance != 0 {
 		t.Fatalf("hits = %+v, want id 7 at distance 0", hits)
 	}
+	got, err := idx.Vector(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 4 || got[0] != 1 {
+		t.Fatalf("vector = %v, want [1 0 0 0]", got)
+	}
+	got[0] = 9
+	again, err := idx.Vector(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again[0] != 1 {
+		t.Fatal("Vector must return a copy")
+	}
 }
 
 func TestDuplicateInsert(t *testing.T) {
