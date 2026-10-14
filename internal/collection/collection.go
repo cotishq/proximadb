@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"github.com/cotishq/proximadb/internal/index"
@@ -13,7 +14,8 @@ import (
 )
 
 // collection is one named HNSW index plus the tags stored beside each id.
-// The graph does not know about tags. Search filters them after the walk.
+// The graph does not know about tags. Empty-filter search walks HNSW.
+// A non-empty equality filter starts from the inverted index, then ranks.
 type collection struct {
 	mu   sync.Mutex
 	dim  int
@@ -22,6 +24,8 @@ type collection struct {
 	tags map[uint64]map[string]string
 	seen map[uint64]struct{}
 	live map[uint64]struct{}
+	// inv[key][value] is the ids that carry that equality tag.
+	inv map[string]map[string]map[uint64]struct{}
 }
 
 // Store is the set of named collections in one process.
@@ -131,9 +135,9 @@ func (s *Store) Insert(name string, id uint64, vec []float32, tags map[string]st
 }
 
 // Search returns the k closest vectors in the named collection.
-// filter is an equality check: every pair must be present on the hit.
-// A nil or empty filter keeps every hit. Candidates are over-fetched so
-// dropping non-matches can still fill k.
+// filter is an equality AND: every pair must be present on the hit.
+// A nil or empty filter walks HNSW. A non-empty filter takes candidate
+// ids from the tag inverted index, then ranks those vectors exactly.
 func (s *Store) Search(name string, query []float32, k int, filter map[string]string) ([]index.Hit, error) {
 	col, err := s.get(name)
 	if err != nil {
@@ -142,28 +146,42 @@ func (s *Store) Search(name string, query []float32, k int, filter map[string]st
 	if k <= 0 {
 		return nil, fmt.Errorf("collection: k must be positive")
 	}
-	limit := k * 4
-	if limit < k {
-		limit = k
+	if len(filter) == 0 {
+		return col.idx.Search(query, k)
 	}
-	hits, err := col.idx.Search(query, limit)
-	if err != nil {
-		return nil, err
-	}
+	return s.searchFiltered(col, query, k, filter)
+}
 
+func (s *Store) searchFiltered(col *collection, query []float32, k int, filter map[string]string) ([]index.Hit, error) {
+	if len(query) != col.dim {
+		return nil, fmt.Errorf("collection: dimension %d, want %d", len(query), col.dim)
+	}
 	col.mu.Lock()
-	defer col.mu.Unlock()
-	matched := make([]index.Hit, 0, k)
-	for _, hit := range hits {
-		if !matchTags(col.tags[hit.ID], filter) {
+	ids := matchingIDs(col, filter)
+	col.mu.Unlock()
+
+	hits := make([]index.Hit, 0, len(ids))
+	for id := range ids {
+		vec, err := col.idx.Vector(id)
+		if err != nil {
 			continue
 		}
-		matched = append(matched, hit)
-		if len(matched) == k {
-			break
+		d, err := metric.Distance(col.m, query, vec)
+		if err != nil {
+			return nil, err
 		}
+		hits = append(hits, index.Hit{ID: id, Distance: d})
 	}
-	return matched, nil
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].Distance == hits[j].Distance {
+			return hits[i].ID < hits[j].ID
+		}
+		return hits[i].Distance < hits[j].Distance
+	})
+	if k > len(hits) {
+		k = len(hits)
+	}
+	return hits[:k], nil
 }
 
 // Delete tombstones id in the named collection and drops its tags.
@@ -236,6 +254,7 @@ func (s *Store) addCollection(name string, m metric.Metric, dim int) error {
 		tags: make(map[uint64]map[string]string),
 		seen: make(map[uint64]struct{}),
 		live: make(map[uint64]struct{}),
+		inv:  make(map[string]map[string]map[uint64]struct{}),
 	}
 	return nil
 }
@@ -286,6 +305,7 @@ func (s *Store) insertInto(col *collection, id uint64, vec []float32, tags map[s
 	}
 	col.mu.Lock()
 	col.tags[id] = tags
+	addToInv(col, id, tags)
 	col.mu.Unlock()
 	col.seen[id] = struct{}{}
 	col.live[id] = struct{}{}
@@ -297,10 +317,70 @@ func (s *Store) deleteFrom(col *collection, id uint64) error {
 		return err
 	}
 	col.mu.Lock()
+	removeFromInv(col, id, col.tags[id])
 	delete(col.tags, id)
 	col.mu.Unlock()
 	delete(col.live, id)
 	return nil
+}
+
+func addToInv(col *collection, id uint64, tags map[string]string) {
+	for key, value := range tags {
+		byValue, ok := col.inv[key]
+		if !ok {
+			byValue = make(map[string]map[uint64]struct{})
+			col.inv[key] = byValue
+		}
+		ids, ok := byValue[value]
+		if !ok {
+			ids = make(map[uint64]struct{})
+			byValue[value] = ids
+		}
+		ids[id] = struct{}{}
+	}
+}
+
+func removeFromInv(col *collection, id uint64, tags map[string]string) {
+	for key, value := range tags {
+		byValue := col.inv[key]
+		if byValue == nil {
+			continue
+		}
+		ids := byValue[value]
+		delete(ids, id)
+		if len(ids) == 0 {
+			delete(byValue, value)
+		}
+		if len(byValue) == 0 {
+			delete(col.inv, key)
+		}
+	}
+}
+
+// matchingIDs returns ids that contain every pair in filter.
+func matchingIDs(col *collection, filter map[string]string) map[uint64]struct{} {
+	var out map[uint64]struct{}
+	first := true
+	for key, value := range filter {
+		ids := col.inv[key][value]
+		if first {
+			out = make(map[uint64]struct{}, len(ids))
+			for id := range ids {
+				out[id] = struct{}{}
+			}
+			first = false
+			continue
+		}
+		for id := range out {
+			if _, ok := ids[id]; !ok {
+				delete(out, id)
+			}
+		}
+	}
+	if out == nil {
+		return map[uint64]struct{}{}
+	}
+	return out
 }
 
 func (s *Store) get(name string) (*collection, error) {
@@ -325,16 +405,6 @@ func copyTags(tags map[string]string) (map[string]string, error) {
 		copied[key] = value
 	}
 	return copied, nil
-}
-
-// matchTags reports whether tags contains every pair in filter.
-func matchTags(tags, filter map[string]string) bool {
-	for key, value := range filter {
-		if tags[key] != value {
-			return false
-		}
-	}
-	return true
 }
 
 func validMetric(m metric.Metric) bool {

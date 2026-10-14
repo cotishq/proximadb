@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/cotishq/proximadb/internal/index/flat"
 	"github.com/cotishq/proximadb/internal/metric"
 )
 
@@ -131,6 +132,63 @@ func TestTagFilter(t *testing.T) {
 	}
 	if len(open) != 2 || open[0].ID != 1 || open[1].ID != 2 {
 		t.Fatalf("unfiltered = %+v, want ids 1 then 2", open)
+	}
+}
+
+func TestRareTagFilterFillsK(t *testing.T) {
+	s := New()
+	oracle, err := flat.New(metric.L2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Create("items", metric.L2, 2); err != nil {
+		t.Fatal(err)
+	}
+	query := []float32{0, 0}
+	red := []float32{1, 0}
+	filter := map[string]string{"color": "red"}
+	for id := uint64(0); id < 190; id++ {
+		if err := s.Insert("items", id, query, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for id := uint64(190); id < 200; id++ {
+		if err := s.Insert("items", id, red, filter); err != nil {
+			t.Fatal(err)
+		}
+		if err := oracle.Insert(id, red); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	unfiltered, err := s.Search("items", query, 10, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hit := range unfiltered {
+		if hit.ID >= 190 {
+			t.Fatalf("unfiltered hit %d, want only untagged neighbors at the query", hit.ID)
+		}
+	}
+
+	filtered, err := s.Search("items", query, 10, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 10 {
+		t.Fatalf("len = %d, want 10", len(filtered))
+	}
+	want, err := oracle.Search(query, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(want) != 10 {
+		t.Fatalf("flat len = %d, want 10", len(want))
+	}
+	for i := range filtered {
+		if filtered[i].ID != want[i].ID {
+			t.Fatalf("filtered[%d] = %d, flat = %d", i, filtered[i].ID, want[i].ID)
+		}
 	}
 }
 
