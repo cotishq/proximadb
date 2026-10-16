@@ -1,22 +1,36 @@
 # ProximaDB
 
-A vector database in Go. Each collection keeps an in-memory HNSW index. Inserts, searches, and deletes are appended to a write-ahead log and replayed on startup.
+A small vector database in Go. You create named collections, insert vectors with optional tags, search by nearest neighbors, and delete by id. Data can live only in memory or on disk under a write-ahead log that replays on startup.
+
+## What you get
+
+- **Collections** — Each has a fixed dimension and distance metric (cosine, L2, or dot). Smaller distance means closer.
+- **HNSW** — Approximate nearest-neighbor search in memory. Deletes are tombstones: ids vanish from results but stay in the graph for navigation.
+- **Equality tags** — Key/value metadata on each vector. Search can filter with an AND of tag pairs, for example `color=red`.
+- **Inverted index for filters** — With a filter, candidates come from a tag map first, then are ranked by exact distance. Rare tags still return `k` results. With no filter, search walks HNSW only.
+- **Flat index** — Exact scan used in tests and benchmarks to measure HNSW recall.
+- **Write-ahead log** — Mutations are appended to `wal.log` under `-data`, then applied in memory. Restart with the same directory rebuilds the collections.
+- **Checkpoint** — In library code you can rewrite the log to drop tombstoned deletes and keep only live vectors (not exposed over gRPC/REST yet).
+- **gRPC and REST** — Same four RPCs on both: create collection, insert, search, delete.
+- **Observability** — OpenTelemetry traces to Jaeger, Prometheus metrics on `/metrics`, Grafana dashboard in Compose.
 
 ## Architecture
 
-A client calls gRPC or REST. Both paths enter the same four methods: create a collection, insert a vector, search, or delete. A collection has a fixed dimension, a distance (cosine, L2, or dot; smaller is closer), an HNSW index, and equality tags stored beside the graph. Search walks HNSW, then keeps hits that match every tag. The exact flat index exists to grade that walk. A delete is a tombstone: the id disappears from results and stays in the graph for navigation.
+A client calls gRPC or REST. Both paths hit the same server: create a collection, insert a vector, search, or delete. The store holds one HNSW graph per collection plus tag maps and an inverted index (`tag key` → `value` → set of ids).
 
-Each change is appended to the write-ahead log first, then applied in memory. Opening the same data directory replays the log and rebuilds the graph. The log is `data/wal.log`.
+Unfiltered search walks HNSW and returns the `k` closest live vectors. Filtered search intersects posting lists for each tag in the filter, loads those vectors, sorts by distance, and returns the top `k`. That path is exact among matching ids, which matters when the tag is rare.
 
-Every one of those four calls is instrumented. The OpenTelemetry SDK inside the process exports traces and serves metrics. There is no OpenTelemetry Collector. Traces are pushed to Jaeger. Prometheus pulls `/metrics`, and Grafana reads Prometheus.
+Each change is appended to the write-ahead log first, then applied in memory. Opening the same data directory replays the log. The log file is `data/wal.log`.
+
+Every RPC is instrumented. The process exports traces and serves metrics from the OpenTelemetry SDK. There is no separate collector. Traces go to Jaeger; Prometheus scrapes `/metrics`; Grafana reads Prometheus.
 
 ```mermaid
 flowchart TB
   subgraph process [ProximaDB process]
     direction TB
     API[gRPC and REST]
-    Store[Collections, HNSW, write-ahead log]
-    Inst[Instrumentation: one span, request count, latency, live vectors]
+    Store[Collections, HNSW, tags, WAL]
+    Inst[Instrumentation: spans, request count, latency, live vectors]
     SDK[OpenTelemetry SDK]
     API --> Store
     API --> Inst
@@ -92,7 +106,7 @@ Grafana shows request count, request rate, latency, and how many vectors are sti
 
 ## Benchmark
 
-In-process search on synthetic vectors. Each coordinate is drawn uniformly from `[-1, 1]`. The same vectors go into HNSW and the exact flat index. Recall@10 is the fraction of the flat top 10 that HNSW also returned. p50 and p99 time only the HNSW search.
+In-process search on synthetic vectors. Each coordinate is drawn uniformly from `[-1, 1]`. The same vectors go into HNSW and the exact flat index. Recall@10 is the fraction of the flat top 10 that HNSW also returned. p50 and p99 time only the HNSW search (unfiltered).
 
 | | |
 | --- | --- |
@@ -118,3 +132,5 @@ go run ./cmd/bench -n 1000000 -dim 16 -queries 100
 ```bash
 go test ./...
 ```
+
+Collection tests include filtered search with rare tags (full `k` vs a flat oracle with the same filter).
