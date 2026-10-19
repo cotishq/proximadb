@@ -106,7 +106,7 @@ func (s *Server) Search(ctx context.Context, req *proximadbv1.SearchRequest) (re
 	if err = ctx.Err(); err != nil {
 		return nil, status.FromContextError(err).Err()
 	}
-	hits, err := s.store.Search(req.GetCollection(), req.GetVector(), int(req.GetK()), req.GetFilter())
+	hits, err := s.store.Search(req.GetCollection(), req.GetVector(), int(req.GetK()), req.GetFilter(), int(req.GetEfSearch()))
 	if err != nil {
 		return nil, rpcErr(err)
 	}

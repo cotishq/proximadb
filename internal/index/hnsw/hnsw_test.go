@@ -145,4 +145,109 @@ func TestRecallAt10(t *testing.T) {
 	}
 }
 
+func TestSearchEfZeroMatchesDefault(t *testing.T) {
+	idx, err := New(metric.L2, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rng := rand.New(rand.NewSource(1))
+	for id := uint64(0); id < 50; id++ {
+		vec := make([]float32, 4)
+		for d := range vec {
+			vec[d] = rng.Float32()*2 - 1
+		}
+		if err := idx.Insert(id, vec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	query := []float32{0.1, -0.2, 0.3, -0.4}
+	base, err := idx.Search(query, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := idx.SearchEf(query, 5, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(base) {
+		t.Fatalf("len = %d, want %d", len(got), len(base))
+	}
+	for i := range base {
+		if got[i].ID != base[i].ID {
+			t.Fatalf("hit %d = %d, want %d", i, got[i].ID, base[i].ID)
+		}
+	}
+	if _, err := idx.SearchEf(query, 5, -1); err == nil {
+		t.Fatal("negative efSearch must fail")
+	}
+}
+
+func TestWiderEfSearchHoldsRecall(t *testing.T) {
+	const (
+		n       = 400
+		dim     = 32
+		queries = 20
+		k       = 10
+	)
+	exact, err := flat.New(metric.L2, dim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approx, err := New(metric.L2, dim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rng := rand.New(rand.NewSource(7))
+	for id := uint64(0); id < n; id++ {
+		vec := make([]float32, dim)
+		for d := range vec {
+			vec[d] = rng.Float32()*2 - 1
+		}
+		if err := exact.Insert(id, vec); err != nil {
+			t.Fatal(err)
+		}
+		if err := approx.Insert(id, vec); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	recall := func(ef int) float64 {
+		t.Helper()
+		var matched, total int
+		qrng := rand.New(rand.NewSource(99))
+		for q := 0; q < queries; q++ {
+			query := make([]float32, dim)
+			for d := range query {
+				query[d] = qrng.Float32()*2 - 1
+			}
+			want, err := exact.Search(query, k)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := approx.SearchEf(query, k, ef)
+			if err != nil {
+				t.Fatal(err)
+			}
+			truth := make(map[uint64]struct{}, len(want))
+			for _, hit := range want {
+				truth[hit.ID] = struct{}{}
+			}
+			for _, hit := range got {
+				if _, ok := truth[hit.ID]; ok {
+					matched++
+				}
+			}
+			total += len(want)
+		}
+		return float64(matched) / float64(total)
+	}
+
+	narrow := recall(k)
+	wide := recall(128)
+	t.Logf("recall ef=%d %.4f, ef=128 %.4f", k, narrow, wide)
+	if wide < narrow {
+		t.Fatalf("ef 128 recall %f < ef %d recall %f", wide, k, narrow)
+	}
+}
+
 var _ index.Index = (*Index)(nil)

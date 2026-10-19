@@ -275,11 +275,14 @@ func (*InsertResponse) Descriptor() ([]byte, []int) {
 }
 
 type SearchRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Collection    string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`
-	Vector        []float32              `protobuf:"fixed32,2,rep,packed,name=vector,proto3" json:"vector,omitempty"`
-	K             uint32                 `protobuf:"varint,3,opt,name=k,proto3" json:"k,omitempty"`
-	Filter        map[string]string      `protobuf:"bytes,4,rep,name=filter,proto3" json:"filter,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Collection string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`
+	Vector     []float32              `protobuf:"fixed32,2,rep,packed,name=vector,proto3" json:"vector,omitempty"`
+	K          uint32                 `protobuf:"varint,3,opt,name=k,proto3" json:"k,omitempty"`
+	Filter     map[string]string      `protobuf:"bytes,4,rep,name=filter,proto3" json:"filter,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// ef_search is the HNSW layer-0 candidate list size.
+	// 0 uses the default of 64. A non-empty filter ignores it and ranks matches exactly.
+	EfSearch      uint32 `protobuf:"varint,5,opt,name=ef_search,json=efSearch,proto3" json:"ef_search,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -340,6 +343,13 @@ func (x *SearchRequest) GetFilter() map[string]string {
 		return x.Filter
 	}
 	return nil
+}
+
+func (x *SearchRequest) GetEfSearch() uint32 {
+	if x != nil {
+		return x.EfSearch
+	}
+	return 0
 }
 
 type Hit struct {
@@ -546,14 +556,15 @@ const file_api_proximadb_v1_proximadb_proto_rawDesc = "" +
 	"\tTagsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x10\n" +
-	"\x0eInsertResponse\"\xd1\x01\n" +
+	"\x0eInsertResponse\"\xee\x01\n" +
 	"\rSearchRequest\x12\x1e\n" +
 	"\n" +
 	"collection\x18\x01 \x01(\tR\n" +
 	"collection\x12\x16\n" +
 	"\x06vector\x18\x02 \x03(\x02R\x06vector\x12\f\n" +
 	"\x01k\x18\x03 \x01(\rR\x01k\x12?\n" +
-	"\x06filter\x18\x04 \x03(\v2'.proximadb.v1.SearchRequest.FilterEntryR\x06filter\x1a9\n" +
+	"\x06filter\x18\x04 \x03(\v2'.proximadb.v1.SearchRequest.FilterEntryR\x06filter\x12\x1b\n" +
+	"\tef_search\x18\x05 \x01(\rR\befSearch\x1a9\n" +
 	"\vFilterEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"1\n" +

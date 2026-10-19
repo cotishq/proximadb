@@ -24,7 +24,7 @@ func TestCollectionsAreIsolated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	images, err := s.Search("images", []float32{1, 0}, 1, nil)
+	images, err := s.Search("images", []float32{1, 0}, 1, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestCollectionsAreIsolated(t *testing.T) {
 		t.Fatalf("images = %+v, want id 1 at distance 0", images)
 	}
 
-	docs, err := s.Search("docs", []float32{1, 0}, 1, nil)
+	docs, err := s.Search("docs", []float32{1, 0}, 1, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestMissingCollectionAndDelete(t *testing.T) {
 	if err := s.Create("b", metric.L2, 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Search("missing", []float32{1}, 1, nil); err == nil {
+	if _, err := s.Search("missing", []float32{1}, 1, nil, 0); err == nil {
 		t.Fatal("missing collection must fail")
 	}
 
@@ -85,14 +85,14 @@ func TestMissingCollectionAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a, err := s.Search("a", []float32{1}, 1, nil)
+	a, err := s.Search("a", []float32{1}, 1, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(a) != 0 {
 		t.Fatalf("deleted collection a returned %+v", a)
 	}
-	b, err := s.Search("b", []float32{1}, 1, nil)
+	b, err := s.Search("b", []float32{1}, 1, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestTagFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	filtered, err := s.Search("items", []float32{0}, 2, map[string]string{"color": "red"})
+	filtered, err := s.Search("items", []float32{0}, 2, map[string]string{"color": "red"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestTagFilter(t *testing.T) {
 		t.Fatalf("filtered = %+v, want ids 1 then 3", filtered)
 	}
 
-	open, err := s.Search("items", []float32{0}, 2, nil)
+	open, err := s.Search("items", []float32{0}, 2, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestRareTagFilterFillsK(t *testing.T) {
 		}
 	}
 
-	unfiltered, err := s.Search("items", query, 10, nil)
+	unfiltered, err := s.Search("items", query, 10, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestRareTagFilterFillsK(t *testing.T) {
 		}
 	}
 
-	filtered, err := s.Search("items", query, 10, filter)
+	filtered, err := s.Search("items", query, 10, filter, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,5 +208,25 @@ func TestLiveCountIgnoresDeleted(t *testing.T) {
 	}
 	if got := s.LiveCount(); got != 1 {
 		t.Fatalf("LiveCount = %d, want 1", got)
+	}
+}
+
+func TestSearchRejectsNegativeEf(t *testing.T) {
+	s := New()
+	if err := s.Create("images", metric.L2, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Insert("images", 1, []float32{1, 0}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Search("images", []float32{1, 0}, 1, nil, -1); err == nil {
+		t.Fatal("negative efSearch must fail")
+	}
+	hits, err := s.Search("images", []float32{1, 0}, 1, nil, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].ID != 1 {
+		t.Fatalf("hits = %+v, want id 1", hits)
 	}
 }

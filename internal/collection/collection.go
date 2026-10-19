@@ -136,9 +136,10 @@ func (s *Store) Insert(name string, id uint64, vec []float32, tags map[string]st
 
 // Search returns the k closest vectors in the named collection.
 // filter is an equality AND: every pair must be present on the hit.
-// A nil or empty filter walks HNSW. A non-empty filter takes candidate
-// ids from the tag inverted index, then ranks those vectors exactly.
-func (s *Store) Search(name string, query []float32, k int, filter map[string]string) ([]index.Hit, error) {
+// A nil or empty filter walks HNSW. ef <= 0 uses the HNSW default candidate
+// list size. A non-empty filter takes candidate ids from the tag inverted
+// index, then ranks those vectors exactly, and ignores ef.
+func (s *Store) Search(name string, query []float32, k int, filter map[string]string, ef int) ([]index.Hit, error) {
 	col, err := s.get(name)
 	if err != nil {
 		return nil, err
@@ -146,8 +147,11 @@ func (s *Store) Search(name string, query []float32, k int, filter map[string]st
 	if k <= 0 {
 		return nil, fmt.Errorf("collection: k must be positive")
 	}
+	if ef < 0 {
+		return nil, fmt.Errorf("collection: efSearch must be non-negative")
+	}
 	if len(filter) == 0 {
-		return col.idx.Search(query, k)
+		return col.idx.SearchEf(query, k, ef)
 	}
 	return s.searchFiltered(col, query, k, filter)
 }

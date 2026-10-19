@@ -103,7 +103,7 @@ func TestClientInsertAndSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	hits, err := reopened.Search("images", []float32{1, 0}, 1, nil)
+	hits, err := reopened.Search("images", []float32{1, 0}, 1, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

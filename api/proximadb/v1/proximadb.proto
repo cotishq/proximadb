@@ -62,6 +62,9 @@ message SearchRequest {
   repeated float vector = 2;
   uint32 k = 3;
   map<string, string> filter = 4;
+  // ef_search is the HNSW layer-0 candidate list size.
+  // 0 uses the default of 64. A non-empty filter ignores it and ranks matches exactly.
+  uint32 ef_search = 5;
 }
 
 message Hit {

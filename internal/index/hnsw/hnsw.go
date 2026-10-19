@@ -15,8 +15,9 @@ import (
 const (
 	defaultM              = 16
 	defaultEfConstruction = 200
-	defaultEfSearch       = 64
-	maxLevelCap           = 16
+	// DefaultEfSearch is the layer-0 candidate list size when a search omits one.
+	DefaultEfSearch = 64
+	maxLevelCap     = 16
 	// maxVisitedIDs is the largest id that uses the reused stamp slice.
 	// Bigger ids fall back to a small map for that one walk.
 	maxVisitedIDs = 32_000_000
@@ -151,7 +152,7 @@ func New(m metric.Metric, dim int) (*Index, error) {
 		M:              defaultM,
 		maxM0:          defaultM * 2,
 		efConstruction: defaultEfConstruction,
-		efSearch:       defaultEfSearch,
+		efSearch:       DefaultEfSearch,
 		ml:             1 / math.Log(float64(defaultM)),
 		rng:            rand.New(rand.NewSource(1)),
 		deleted:        make(map[uint64]struct{}),
@@ -251,12 +252,22 @@ func (idx *Index) Insert(id uint64, vec []float32) error {
 }
 
 // Search walks from the top layer down and returns the k closest live ids.
+// It uses DefaultEfSearch.
 func (idx *Index) Search(query []float32, k int) ([]index.Hit, error) {
+	return idx.SearchEf(query, k, 0)
+}
+
+// SearchEf is Search with an explicit layer-0 candidate list size.
+// ef <= 0 uses the index default. The walk keeps at least k candidates.
+func (idx *Index) SearchEf(query []float32, k int, ef int) ([]index.Hit, error) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
 	if k <= 0 {
 		return nil, fmt.Errorf("hnsw: k must be positive")
+	}
+	if ef < 0 {
+		return nil, fmt.Errorf("hnsw: efSearch must be non-negative")
 	}
 	if len(query) != idx.dim {
 		return nil, fmt.Errorf("hnsw: dimension %d, want %d", len(query), idx.dim)
@@ -274,7 +285,9 @@ func (idx *Index) Search(query []float32, k int) ([]index.Hit, error) {
 		ep = nearest[0].id
 	}
 
-	ef := idx.efSearch
+	if ef == 0 {
+		ef = idx.efSearch
+	}
 	if ef < k {
 		ef = k
 	}

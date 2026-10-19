@@ -19,16 +19,17 @@ func main() {
 	queries := flag.Int("queries", 100, "search queries")
 	k := flag.Int("k", 10, "neighbors to retrieve")
 	seed := flag.Int64("seed", 42, "rng seed for vectors and queries")
+	ef := flag.Int("ef", hnsw.DefaultEfSearch, "HNSW efSearch; 0 uses the default of 64")
 	flag.Parse()
-	if err := run(*n, *dim, *queries, *k, *seed); err != nil {
+	if err := run(*n, *dim, *queries, *k, *seed, *ef); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(n, dim, queries, k int, seed int64) error {
-	if n <= 0 || dim <= 0 || queries <= 0 || k <= 0 {
-		return fmt.Errorf("n, dim, queries, and k must be positive")
+func run(n, dim, queries, k int, seed int64, ef int) error {
+	if n <= 0 || dim <= 0 || queries <= 0 || k <= 0 || ef < 0 {
+		return fmt.Errorf("n, dim, queries, and k must be positive, and efSearch must be non-negative")
 	}
 
 	exact, err := flat.New(metric.L2, dim)
@@ -71,7 +72,7 @@ func run(n, dim, queries, k int, seed int64) error {
 			return err
 		}
 		start := time.Now()
-		got, err := approx.Search(query, k)
+		got, err := approx.SearchEf(query, k, ef)
 		latencies[q] = time.Since(start)
 		if err != nil {
 			return err
@@ -95,7 +96,10 @@ func run(n, dim, queries, k int, seed int64) error {
 	fmt.Printf("metric L2\n")
 	fmt.Printf("M 16\n")
 	fmt.Printf("efConstruction 200\n")
-	fmt.Printf("efSearch 64\n")
+	if ef == 0 {
+		ef = hnsw.DefaultEfSearch
+	}
+	fmt.Printf("efSearch %d\n", ef)
 	fmt.Printf("queries %d\n", queries)
 	fmt.Printf("k %d\n", k)
 	fmt.Printf("seed %d\n", seed)

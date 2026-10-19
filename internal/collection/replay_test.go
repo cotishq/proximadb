@@ -37,7 +37,7 @@ func TestReplayRestoresSearch(t *testing.T) {
 	}
 	defer s.Close()
 
-	hits, err := s.Search("images", []float32{1, 0}, 2, map[string]string{"color": "red"})
+	hits, err := s.Search("images", []float32{1, 0}, 2, map[string]string{"color": "red"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestReplayRestoresSearch(t *testing.T) {
 		t.Fatalf("filtered = %+v, want id 1 at distance 0", hits)
 	}
 
-	all, err := s.Search("images", []float32{0, 1}, 2, nil)
+	all, err := s.Search("images", []float32{0, 1}, 2, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestCheckpointDropsDeleted(t *testing.T) {
 	if s.LiveCount() != 1 {
 		t.Fatalf("LiveCount = %d, want 1", s.LiveCount())
 	}
-	hits, err := s.Search("images", []float32{1, 0}, 2, map[string]string{"color": "red"})
+	hits, err := s.Search("images", []float32{1, 0}, 2, map[string]string{"color": "red"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

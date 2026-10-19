@@ -18,7 +18,7 @@ A small vector database in Go. You create named collections, insert vectors with
 
 A client calls gRPC or REST. Both paths hit the same server: create a collection, insert a vector, search, or delete. The store holds one HNSW graph per collection plus tag maps and an inverted index (`tag key` → `value` → set of ids).
 
-Unfiltered search walks HNSW and returns the `k` closest live vectors. Filtered search intersects posting lists for each tag in the filter, loads those vectors, sorts by distance, and returns the top `k`. That path is exact among matching ids, which matters when the tag is rare.
+Unfiltered search walks HNSW and returns the `k` closest live vectors. `ef_search` sets how many candidates that walk keeps on the bottom layer. `0` uses 64. Filtered search intersects posting lists for each tag in the filter, loads those vectors, sorts by distance, and returns the top `k`. That path is exact among matching ids, so it ignores `ef_search`.
 
 Each change is appended to the write-ahead log first, then applied in memory. Opening the same data directory replays the log. The log file is `data/wal.log`.
 
@@ -80,6 +80,8 @@ curl -sS -X POST http://127.0.0.1:7879/v1/collections/images/search \
 curl -sS -X DELETE http://127.0.0.1:7879/v1/collections/images/vectors/7
 ```
 
+`ef_search` on a search body widens or narrows the unfiltered HNSW walk. Omit it, or send `0`, to keep 64. A filtered search ranks the matching ids exactly and does not use it.
+
 ### Dashboards
 
 Compose starts Prometheus, Grafana, and Jaeger. It does not start ProximaDB.
@@ -122,6 +124,8 @@ Uniform vectors in 128 dimensions make neighbors harder to separate, so the dim-
 go run ./cmd/bench -n 1000000 -dim 16 -queries 100
 go run ./cmd/bench -n 100000 -dim 128 -queries 100
 ```
+
+Pass `-ef` to change the HNSW search width. The table used the default, 64.
 
 ## Tests
 
