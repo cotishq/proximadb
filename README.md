@@ -153,6 +153,18 @@ go run ./cmd/bench -n 1000000 -dim 16 -queries 100
 go run ./cmd/bench -n 100000 -dim 128 -queries 100 -ef 64,128,256
 ```
 
+## Limits
+
+ProximaDB is one process. There is no cluster, no auth, and no client SDK.
+
+Restarting with the same `-data` directory replays `wal.log` and rebuilds the graph in memory. The graph itself is not stored on disk.
+
+A deleted id cannot be inserted again. Delete is a tombstone: the id leaves search results and stays in the graph for navigation.
+
+Checkpoint rewrites the log down to the vectors that are still live. It is a Go method, `Store.Checkpoint`. It is not a gRPC or REST call.
+
+`ef_search` changes the unfiltered HNSW walk. A filtered search ranks the matching ids by exact distance and ignores it.
+
 ## Tests
 
 ```bash
