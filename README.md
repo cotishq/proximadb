@@ -108,24 +108,31 @@ Grafana shows request count, request rate, latency, and how many vectors are sti
 
 ## Benchmark
 
-In-process search on synthetic vectors. Each coordinate is drawn uniformly from `[-1, 1]`. The same vectors go into HNSW and the exact flat index. Recall@10 is the fraction of the flat top 10 that HNSW also returned. p50 and p99 time only the HNSW search (unfiltered). Both runs use L2, M=16, efConstruction=200, efSearch=64, 100 queries, and seed 42, on an Intel Core i5-12450H (12 threads, 15 GB RAM). efSearch was not raised for the higher dimension.
+In-process search on synthetic vectors. Each coordinate is drawn uniformly from `[-1, 1]`. The same vectors go into HNSW and the exact flat index. Recall@10 is the fraction of the flat top 10 that HNSW also returned. p50 and p99 time only the HNSW search (unfiltered). Both setups use L2, M=16, efConstruction=200, 100 queries, and seed 42, on an Intel Core i5-12450H (12 threads, 15 GB RAM).
 
-| | dim 16 | dim 128 |
-| --- | --- | --- |
-| Vectors | 1,000,000 | 100,000 |
-| Recall@10 | 0.997 | 0.405 |
-| Search p50 | 1.07 ms | 1.53 ms |
-| Search p99 | 1.91 ms | 2.06 ms |
-| Insert | 50 min 40 s | 7 min 40 s |
+| | dim 16 |
+| --- | --- |
+| Vectors | 1,000,000 |
+| efSearch | 64 |
+| Recall@10 | 0.997 |
+| Search p50 | 1.07 ms |
+| Search p99 | 1.91 ms |
+| Insert | 50 min 40 s |
 
-Uniform vectors in 128 dimensions make neighbors harder to separate, so the dim-16 search width does not hold recall. Search latency stays in the same range because the graph walk visits a similar number of nodes; each distance just reads more coordinates.
+Dim 128 is 100,000 vectors, inserted once in 7 min 55 s. The three searches below ran on that same graph.
+
+| efSearch | Recall@10 | Search p50 | Search p99 |
+| --- | --- | --- | --- |
+| 64 | 0.405 | 1.10 ms | 1.53 ms |
+| 128 | 0.545 | 2.21 ms | 2.86 ms |
+| 256 | 0.715 | 3.69 ms | 4.58 ms |
+
+A wider walk finds more of the true neighbors and costs more time. At dim 128, raising `efSearch` from 64 to 256 lifts recall from 0.405 to 0.715. It does not recover the dim-16 result. These are uniform random coordinates, so distances sit close together and the graph has less structure to follow.
 
 ```bash
 go run ./cmd/bench -n 1000000 -dim 16 -queries 100
-go run ./cmd/bench -n 100000 -dim 128 -queries 100
+go run ./cmd/bench -n 100000 -dim 128 -queries 100 -ef 64,128,256
 ```
-
-Pass `-ef` to change the HNSW search width. The table used the default, 64.
 
 ## Tests
 

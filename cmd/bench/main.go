@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cotishq/proximadb/internal/index/flat"
@@ -19,17 +21,22 @@ func main() {
 	queries := flag.Int("queries", 100, "search queries")
 	k := flag.Int("k", 10, "neighbors to retrieve")
 	seed := flag.Int64("seed", 42, "rng seed for vectors and queries")
-	ef := flag.Int("ef", hnsw.DefaultEfSearch, "HNSW efSearch; 0 uses the default of 64")
+	efFlag := flag.String("ef", strconv.Itoa(hnsw.DefaultEfSearch), "comma-separated HNSW efSearch values; 0 uses the default of 64")
 	flag.Parse()
-	if err := run(*n, *dim, *queries, *k, *seed, *ef); err != nil {
+	efs, err := parseEFs(*efFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := run(*n, *dim, *queries, *k, *seed, efs); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(n, dim, queries, k int, seed int64, ef int) error {
-	if n <= 0 || dim <= 0 || queries <= 0 || k <= 0 || ef < 0 {
-		return fmt.Errorf("n, dim, queries, and k must be positive, and efSearch must be non-negative")
+func run(n, dim, queries, k int, seed int64, efs []int) error {
+	if n <= 0 || dim <= 0 || queries <= 0 || k <= 0 || len(efs) == 0 {
+		return fmt.Errorf("n, dim, queries, and k must be positive")
 	}
 
 	exact, err := flat.New(metric.L2, dim)
@@ -57,57 +64,82 @@ func run(n, dim, queries, k int, seed int64, ef int) error {
 		}
 	}
 	insertElapsed := time.Since(insertStart)
+	fmt.Fprintf(os.Stderr, "inserted %d in %s\n", n, insertElapsed.Round(time.Second))
 
 	querySet := make([][]float32, queries)
 	for q := 0; q < queries; q++ {
 		querySet[q] = make([]float32, dim)
 		fill(rng, querySet[q])
 	}
-
-	latencies := make([]time.Duration, queries)
-	var matched, total int
+	truth := make([]map[uint64]struct{}, queries)
 	for q, query := range querySet {
 		want, err := exact.Search(query, k)
 		if err != nil {
 			return err
 		}
-		start := time.Now()
-		got, err := approx.SearchEf(query, k, ef)
-		latencies[q] = time.Since(start)
-		if err != nil {
-			return err
-		}
-		truth := make(map[uint64]struct{}, len(want))
+		truth[q] = make(map[uint64]struct{}, len(want))
 		for _, hit := range want {
-			truth[hit.ID] = struct{}{}
+			truth[q][hit.ID] = struct{}{}
 		}
-		for _, hit := range got {
-			if _, ok := truth[hit.ID]; ok {
-				matched++
-			}
-		}
-		total += len(want)
 	}
 
-	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
-	recall := float64(matched) / float64(total)
 	fmt.Printf("n %d\n", n)
 	fmt.Printf("dim %d\n", dim)
 	fmt.Printf("metric L2\n")
 	fmt.Printf("M 16\n")
 	fmt.Printf("efConstruction 200\n")
-	if ef == 0 {
-		ef = hnsw.DefaultEfSearch
-	}
-	fmt.Printf("efSearch %d\n", ef)
 	fmt.Printf("queries %d\n", queries)
 	fmt.Printf("k %d\n", k)
 	fmt.Printf("seed %d\n", seed)
 	fmt.Printf("insert %s\n", insertElapsed.Round(time.Millisecond))
-	fmt.Printf("recall@%d %.4f\n", k, recall)
-	fmt.Printf("p50 %s\n", percentile(latencies, 0.50))
-	fmt.Printf("p99 %s\n", percentile(latencies, 0.99))
+	for _, ef := range efs {
+		latencies := make([]time.Duration, queries)
+		var matched, total int
+		for q, query := range querySet {
+			start := time.Now()
+			got, err := approx.SearchEf(query, k, ef)
+			latencies[q] = time.Since(start)
+			if err != nil {
+				return err
+			}
+			for _, hit := range got {
+				if _, ok := truth[q][hit.ID]; ok {
+					matched++
+				}
+			}
+			total += len(truth[q])
+		}
+		sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+		shown := ef
+		if shown == 0 {
+			shown = hnsw.DefaultEfSearch
+		}
+		fmt.Printf("efSearch %d\n", shown)
+		fmt.Printf("recall@%d %.4f\n", k, float64(matched)/float64(total))
+		fmt.Printf("p50 %s\n", percentile(latencies, 0.50))
+		fmt.Printf("p99 %s\n", percentile(latencies, 0.99))
+	}
 	return nil
+}
+
+func parseEFs(s string) ([]int, error) {
+	parts := strings.Split(s, ",")
+	efs := make([]int, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, fmt.Errorf("efSearch list contains an empty value")
+		}
+		ef, err := strconv.Atoi(part)
+		if err != nil || ef < 0 {
+			return nil, fmt.Errorf("efSearch must be a non-negative integer, got %q", part)
+		}
+		efs = append(efs, ef)
+	}
+	if len(efs) == 0 {
+		return nil, fmt.Errorf("efSearch list is empty")
+	}
+	return efs, nil
 }
 
 func fill(rng *rand.Rand, vec []float32) {
