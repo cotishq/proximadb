@@ -106,6 +106,25 @@ go run ./cmd/proximadb -listen 127.0.0.1:7878 -http 0.0.0.0:7879 -data ./data
 
 Grafana shows request count, request rate, latency, and how many vectors are still searchable. Jaeger shows one span per call. Ports `9091` and `3001` are the host mappings in this Compose file, because `9090` and `3000` are often already taken.
 
+## Demo
+
+ProximaDB stores vectors and ids. The text stays in the client. This example embeds a dozen product sentences with a hashed bag of words, inserts them with a `color` tag, and searches for "red shoes" with `color=red`.
+
+Start the server with an empty data directory. Creating `catalog` again in the same directory fails, and a deleted id cannot be inserted again.
+
+```bash
+go run ./cmd/proximadb -data ./data
+go run ./examples/demo
+```
+
+```text
+query: red shoes
+filter: color=red
+1  0.184  red leather shoes
+```
+
+That is the first of the three hits. Blue shoes are in the collection and are left out by the filter.
+
 ## Benchmark
 
 In-process search on synthetic vectors. Each coordinate is drawn uniformly from `[-1, 1]`. The same vectors go into HNSW and the exact flat index. Recall@10 is the fraction of the flat top 10 that HNSW also returned. p50 and p99 time only the HNSW search (unfiltered). Both setups use L2, M=16, efConstruction=200, 100 queries, and seed 42, on an Intel Core i5-12450H (12 threads, 15 GB RAM).
